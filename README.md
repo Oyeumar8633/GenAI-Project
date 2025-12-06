@@ -1,301 +1,143 @@
-# Chain-of-Visual-Thought (CoVT) Reproduction Project
+# Lightweight CoVT-Inspired Visual Reasoning using Interleave-Qwen-0.5B
 
-This project reproduces and extends the Chain-of-Visual-Thought (CoVT) approach, implementing a novel visual-text fused reasoning pipeline with comparative experiments on the **CLEVR dataset**.
+This repository contains the implementation of a lightweight, training-free, CoVT-inspired visual reasoning framework built on top of a small interleaved vision–language model. The project investigates whether a 0.5B-parameter model, llava-interleave-qwen-0.5b-hf, can approximate Chain-of-Visual-Thought (CoVT)-style compositional visual reasoning on the CLEVR dataset using only prompt-based techniques, without any additional training.
 
-## Project Overview
+## Overview
 
-This project implements three reasoning methods:
+We implement and compare three reasoning strategies:
 
-1. **CoVT-style Visual CoT**: Original visual chain-of-thought reasoning using image regions
-2. **Visual + Text Fusion (Novel)**: Novel extension that fuses visual observations and textual reasoning at each step
-3. **Text-only CoT (Baseline)**: Baseline text-only chain-of-thought from LLaVA
+1. **Text-only Chain-of-Thought (CoT) baseline** – Uses only the question text with a "Think step by step" prompt, ignoring visual features.
+2. **Visual CoT (CoVT-inspired)** – Extracts SigLIP visual tokens, mean-pools them, converts them into compact textual pseudo-observations, and constructs a multi-step visual chain-of-thought. This is inspired by CoVT but does not use region segmentation or supervisory signals.
+3. **Visual–Text Fusion Reasoner (proposed)** – Alternates between extracting visual observations and generating textual reasoning for each step. Stores paired (observation, reasoning) tuples and produces a final answer conditioned on all fused steps.
+
+All methods operate in a purely zero-shot setting using the frozen backbone.
 
 ## Dataset: CLEVR
 
-This project uses **CLEVR** (Compositional Language and Elementary Visual Reasoning), a synthetic visual reasoning dataset that is:
-- **Small and manageable** (~86MB for questions, small image subset needed)
-- **Perfect for visual reasoning** - designed for compositional reasoning tasks
-- **Stable and well-structured** - synthetic images with clear ground truth
+We use a 50-sample stratified subset of the CLEVR validation split. The subset covers four question families: existence, counting, integer comparison, and attribute comparison. Only a small folder of validation images (50–300 images) is needed.
 
-### CLEVR Dataset Structure
-
-- **Questions JSON**: Contains questions, answers, and image filename mappings
-- **Images**: Synthetic scenes with objects (only need 100-300 images for testing)
-- **Answers**: Simple strings ("yes", "no", "red", "3", etc.)
-
-## Project Structure
-
+Expected layout:
 ```
-/project
-    /data
-        clevr_questions.json      # CLEVR questions JSON file
-        images_subset/            # Small subset of CLEVR images
-    /models                       # Model cache directory
-    /src
-        dataset_clevr.py          # CLEVR dataset loader
-        visual_utils.py            # Image processing and region detection
-        reasoning_baseline.py      # Text-only CoT reasoning
-        reasoning_cvt.py           # Original CoVT-style reasoning
-        reasoning_fusion.py       # Novel visual-text fusion
-        evaluate.py                # Evaluation and comparison
-        plots.py                   # Visualization functions
-    main.ipynb                     # Main notebook for end-to-end pipeline
-    requirements.txt               # Python dependencies
-    README.md                      # This file
+project/
+├── data/
+│   ├── clevr_questions.json
+│   └── images_subset/
+├── models/
+├── src/
+│   ├── dataset_clevr.py
+│   ├── visual_utils.py
+│   ├── reasoning_baseline.py
+│   ├── reasoning_cvt.py
+│   ├── reasoning_fusion.py
+│   ├── evaluate.py
+│   └── plots.py
+├── main.ipynb
+├── requirements.txt
+└── README.md
 ```
 
 ## Installation
 
-1. Clone or download this repository
-
-2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Setup CLEVR dataset:
+A GPU is recommended but not required for small subsets.
 
-   **If you have CLEVR_v1.0 directory locally:**
-   ```bash
-   # Extract images from local CLEVR directory
-   python download_clevr_images.py --clevr-dir /path/to/CLEVR_v1.0 --num-images 200 --split val
-   
-   # Copy questions file
-   cp /path/to/CLEVR_v1.0/questions/CLEVR_val_questions.json data/clevr_questions.json
-   ```
-   
-   **If you need to download CLEVR:**
-   - Download CLEVR v1.0 (no images) - 86 MB:
-     - https://cs.stanford.edu/people/jcjohns/clevr/CLEVR_v1.0_no_images.zip
-     - Extract and place `CLEVR_v1.0/questions/CLEVR_val_questions.json` as `data/clevr_questions.json`
-   
-   - Download CLEVR Images:
-     - Train: https://dl.fbaipublicfiles.com/clevr/CLEVR_v1.0_train.zip (13GB)
-     - Val: https://dl.fbaipublicfiles.com/clevr/CLEVR_v1.0_val.zip (5GB)
-     - Extract and use `--clevr-dir` option with the script
+## CLEVR Setup (Lightweight)
+
+### If you have CLEVR_v1.0 locally:
+```bash
+python download_clevr_images.py --clevr-dir /path/to/CLEVR_v1.0 --num-images 200 --split val
+cp /path/to/CLEVR_v1.0/questions/CLEVR_val_questions.json data/clevr_questions.json
+```
+
+### If you need the dataset:
+Use CLEVR_v1.0_no_images.zip (86MB) for questions and optionally download full image sets. Only a small subset of images is required for this project.
 
 ## Usage
 
-### Quick Start - Run Experiments
-
-**Option 1: Using the Experiment Runner (Recommended)**
-
+### Full experiment pipeline:
 ```bash
-# 1. Setup CLEVR dataset (if you have local CLEVR_v1.0 directory)
-python download_clevr_images.py --clevr-dir /path/to/CLEVR_v1.0 --num-images 200 --split val
-
-# 2. Verify dataset setup
-python src/verify_clevr_paths.py
-
-# 3. Run experiments
 python src/run_experiments.py --num-samples 50 --split val --device cuda
-
-# 4. Generate paper artifacts
-python src/generate_paper_artifacts.py
 ```
 
-**Option 2: Using Jupyter Notebook**
+This loads CLEVR samples, runs all three reasoning methods, computes accuracy, and saves results to JSON.
 
-Open `main.ipynb` in Jupyter Notebook or Google Colab and run all cells. The notebook will:
+### Notebook usage:
+Use `main.ipynb` for dataset inspection, method testing, and visualization.
 
-1. Set up CLEVR dataset from local directory
-2. Verify dataset setup
-3. Display CLEVR samples
-4. Initialize all three reasoning models
-5. Test individual methods
-6. Run full experiments
-7. Generate visualizations
-8. Create paper artifacts
-
-### Programmatic Usage
+## Programmatic API Example
 
 ```python
-from src import (
-    load_clevr_from_questions_file,
-    TextOnlyCoTReasoner,
-    CoVTVisualReasoner,
-    VisualTextFusionReasoner,
-    ReasoningEvaluator
-)
+from src.dataset_clevr import load_clevr_from_questions_file
+from src.reasoning_baseline import TextOnlyCoTReasoner
+from src.reasoning_cvt import CoVTVisualReasoner
+from src.reasoning_fusion import VisualTextFusionReasoner
+from src.evaluate import ReasoningEvaluator
 
-# Load CLEVR dataset
-samples = load_clevr_from_questions_file(
-    questions_path="data/clevr_questions.json",
-    images_dir="data/images_subset",
-    split="val",
-    num_samples=100
-)
+samples = load_clevr_from_questions_file("data/clevr_questions.json", "data/images_subset", "val", num_samples=50)
 
-# Initialize reasoners
 baseline = TextOnlyCoTReasoner(device="cuda")
-covt = CoVTVisualReasoner(device="cuda", num_visual_steps=3)
-fusion = VisualTextFusionReasoner(device="cuda", num_fusion_steps=4)
+visual_cot = CoVTVisualReasoner(device="cuda", num_visual_steps=3)
+fusion = VisualTextFusionReasoner(device="cuda", num_fusion_steps=3)
 
-# Initialize evaluator
-evaluator = ReasoningEvaluator(baseline, covt, fusion)
-
-# Evaluate
-summary = evaluator.evaluate_dataset(
-    samples,
-    max_samples=50,
-    save_results="results.json"
-)
-
-# Print comparison table
-print(evaluator.generate_comparison_table(summary))
+evaluator = ReasoningEvaluator(baseline, visual_cot, fusion)
+summary = evaluator.evaluate_dataset(samples, max_samples=50, save_results="data/results/results.json")
+print(summary)
 ```
 
-### Individual Reasoning Methods
+## Reasoning Methods
 
-#### Text-only CoT (Baseline)
-```python
-from src import cot_text_only
-from PIL import Image
+### Text-only CoT
+Builds a textual CoT prompt, generates step-by-step reasoning, and extracts the final answer.
 
-result = cot_text_only(image, question)
-print(result["answer"])
-print(result["steps"])
-```
+### Visual CoT (CoVT-Inspired)
+Passes the image through SigLIP inside llava-interleave-qwen-0.5b-hf, mean-pools visual tokens, produces pseudo-observations, and constructs a multi-step visual reasoning prompt. Does not use region proposals or training.
 
-#### CoVT-style Visual CoT
-```python
-from src import coct_visual_reason
+### Visual–Text Fusion Reasoner
+Iteratively alternates between visual observation extraction and textual reasoning generation. After K steps, all pairs are fused into a final summary prompt used to generate the answer.
 
-result = coct_visual_reason(image, question, num_steps=3)
-print(result["answer"])
-print(result["steps"])
-```
+## Model and Inference Settings
 
-#### Visual + Text Fusion
-```python
-from src import coct_visual_text_fused
+- **Backbone:** llava-interleave-qwen-0.5b-hf
+- **Vision:** SigLIP encoder
+- **Language:** Qwen 0.5B
+- **Inference:** FP16, greedy decoding, optional 4-bit quantization
 
-result = coct_visual_text_fused(image, question, num_steps=4)
-print(result["answer"])
-print(result["visual_steps"])
-print(result["text_steps"])
-```
+No training or fine-tuning is performed.
 
-## Models
+## Evaluation
 
-The project uses:
-- **Primary**: LLaVA 1.5 (7B) from HuggingFace: `llava-hf/llava-1.5-7b-hf`
-- **Optional**: BLIP-2 for comparison: `Salesforce/blip2-flan-t5-xl`
+Metrics include:
+- Accuracy (exact/containment match)
+- Average reasoning steps
+- Per-question-family accuracy
+- Qualitative examples and traces
 
-Models are loaded with:
-- bfloat16 precision (default)
-- 4-bit quantization (optional, for memory efficiency)
-- 8-bit quantization (optional)
+Outputs:
+- `results.json`
+- Plots under `data/results/plots/`
 
-## Evaluation Metrics
-
-The evaluation produces:
-1. **Accuracy**: Percentage of correct answers (CLEVR has simple string answers)
-2. **Average Reasoning Steps**: Mean number of reasoning steps per method
-3. **Visual Evidence**: Whether method uses visual regions
-4. **Qualitative Examples**: Side-by-side comparisons
-
-## Outputs
-
-The evaluation generates:
-- Comparison table (accuracy, steps, visual evidence)
-- Bar chart: Accuracy comparison
-- Line chart: Reasoning steps vs accuracy
-- Scatter plot: Failure case analysis
-- Qualitative examples with visualizations
-
-## Requirements
-
-- Python 3.8+
-- CUDA-capable GPU (recommended) or CPU
-- ~15GB disk space for models
-- Small CLEVR image subset (100-300 images, ~50-150MB)
-
-## Running Experiments
-
-### Full Experiment Pipeline
+## Reproducing Paper Results
 
 ```bash
-# 1. Setup dataset
+pip install -r requirements.txt
 python download_clevr_images.py --clevr-dir /path/to/CLEVR_v1.0 --num-images 200 --split val
-
-# 2. Verify setup
-python src/verify_clevr_paths.py
-
-# 3. Run experiments (evaluates all three methods)
 python src/run_experiments.py --num-samples 50 --split val --device cuda
-
-# 4. Generate visualizations (in Python)
-python -c "
-from src.plots import plot_all_results
-import json
-with open('data/results/results.json') as f:
-    data = json.load(f)
-plot_all_results(data['summary'], data['samples'], 'data/results/plots')
-"
-
-# 5. Generate paper artifacts
 python src/generate_paper_artifacts.py
 ```
-
-### Expected Output
-
-After running experiments, you'll get:
-
-- **Results**: `data/results/results.json` - Full results with predictions
-- **Plots**: `data/results/plots/` - Accuracy comparisons, visualizations
-- **Artifacts**: `paper_artifacts/` - Examples, metrics, confusion matrix
-
-### Results Table Format
-
-```
-Method                  Accuracy    Avg Steps
---------------------------------------------
-Text-only CoT           XX%        X.X
-Visual CoT (CoVT)       XX%        X.X
-Visual+Text Fusion      XX%        X.X
-```
-
-## Reproducing Results
-
-To reproduce the experiments:
-
-1. **Setup environment:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Setup CLEVR dataset:**
-   ```bash
-   python download_clevr_images.py --clevr-dir /path/to/CLEVR_v1.0 --num-images 200 --split val
-   ```
-
-3. **Run experiments:**
-   ```bash
-   python src/run_experiments.py --num-samples 50 --split val --device cuda
-   ```
-
-4. **View results:**
-   ```bash
-   cat data/results/results.json | python -m json.tool
-   ```
 
 ## Notes
 
-- The dataset loader supports quick testing with small subsets (100-300 samples)
-- Image embeddings are cached for speed optimization
-- All functions are thoroughly documented
-- The pipeline is designed to run end-to-end in Jupyter notebooks
-- CLEVR answers are simple strings, making evaluation straightforward
-- Experiments can be run via script or notebook - both produce same results
+- Only a small CLEVR image subset is required.
+- All methods share the same model instance for fair comparison.
+- Image features can be cached for speed.
 
 ## Citation
 
-If you use this code, please cite the original CoVT paper and acknowledge this implementation.
+Please cite CLEVR, CoVT, and the associated paper for this project.
 
 ## License
 
-This project is for research purposes. Please check licenses for:
-- CLEVR dataset
-- LLaVA model
-- CLIP model
+For research and educational use only. Check license for details.
